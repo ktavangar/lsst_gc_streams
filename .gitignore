@@ -1,2 +1,4 @@
 *.fits
 desc/
+mocks/
+__pycache__/
