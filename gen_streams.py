@@ -4,6 +4,8 @@ from isochrones import get_ichrone
 from isochrones.mist.bc import MISTBolometricCorrectionGrid
 import h5py
 import numpy as np
+import dustmaps.sfd
+
 
 
 
@@ -125,7 +127,14 @@ def _phot_stream(stream, cluster, bands=['LSST_g', 'LSST_r', 'Gaia_G_DR2Rev']):
     masses = stream['mass'][:]
     feh = float(cluster['feh'][()])
     age = float(np.log10(cluster['age'][()]*1e9))
-    Av = 0
+
+    stream_icrs = _convert_stream_icrs(stream)
+    coords = coord.SkyCoord(ra=stream_icrs.ra, dec=stream_icrs.dec, frame='icrs')
+
+
+    query_sfd = dustmaps.sfd.SFDQuery()
+    ebv_sfd = query_sfd(coords)
+    Av = 3.1 * ebv_sfd
 
     eep = np.array([_get_eep_scalar(mass, age, feh, mist) for mass in masses])
     interp = mist.interp_value([eep, age, feh], ['Teff', 'logg', 'Mbol'])
