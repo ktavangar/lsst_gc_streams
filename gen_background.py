@@ -4,12 +4,21 @@ from GCRCatalogs.helpers.tract_catalogs import tract_filter, sample_filter
 from GCRCatalogs import GCRQuery
 import numpy as np
 from astropy.coordinates import angular_separation
+from dustmaps.sfd import SFDQuery
+from astropy import units as u
+import astropy.coordinates as coord
+
 
 
 
 ## Approximate central location of DC2 sky footprint
 DC2_MED_RA = 61.93478343665261
 DC2_MED_DEC = -36.04770943348744
+
+## Extinction coefficients for LSST filters (for SFD dust map) from Schlafly & Finkbeiner 2011
+R_G_LSST = 3.237
+R_R_LSST = 2.273
+
 
 
 
@@ -62,7 +71,7 @@ def _rotate_vectors(vectors, axis, angle):
 
 
 
-def _translate_catalog_radec(ra, dec, old_center, new_center):
+def _rotate_catalog_radec(ra, dec, old_center, new_center):
     """
     Performs a rotation of the input RA and DEC coordinates from the old_center to the new_center. 
     This is necessary to translate the DC2 catalog coordinates to be centered on the cluster of interest for our mock observations.
@@ -151,14 +160,24 @@ def gen_background_data(cluster_icrs, search_radius):
 
     data_bkg =  obj_cat.get_quantities(quantities=quantities, filters=filters)
 
+    # Query SFD dust map to un-extinguish sources in the original DC2 catalog for rotation
+    coords = coord.SkyCoord(ra=data_bkg['ra']*u.degree, dec=data_bkg['dec']*u.degree, frame='icrs')
+    sfd = SFDQuery()
+    ebv = sfd(coords)
+
+    A_g = ebv * R_G_LSST
+    A_r = ebv * R_R_LSST
+
+    data_bkg['mag_g_cModel'] -= A_g
+    data_bkg['mag_r_cModel'] -= A_r
 
 
 
-    ra_rot, dec_rot = _translate_catalog_radec(data_bkg['ra'], data_bkg['dec'],
+
+    ra_rot, dec_rot = _rotate_catalog_radec(data_bkg['ra'], data_bkg['dec'],
                                          old_center=(DC2_MED_RA, DC2_MED_DEC),
                                             new_center=(cluster_icrs.ra.degree, cluster_icrs.dec.degree))
     
-
 
     in_circle = np.degrees(angular_separation(np.radians(ra_rot), np.radians(dec_rot), 
                                 np.radians(cluster_icrs.ra.degree), np.radians(cluster_icrs.dec.degree))) < search_radius
@@ -167,7 +186,18 @@ def gen_background_data(cluster_icrs, search_radius):
 
     data_bkg['ra'] = ra_rot
     data_bkg['dec'] = dec_rot
-    data_in_circle = {key: val[in_circle] for key, val in data_bkg.items()}
 
+    newcoords = coord.SkyCoord(ra=data_bkg['ra']*u.degree, dec=data_bkg['dec']*u.degree, frame='icrs')
+
+    ## re-apply extinction correction after rotation, can change the dust map used here later if desired
+    sfdnew = SFDQuery() 
+    ebv_newcoords = sfdnew(newcoords)
+
+    data_bkg['mag_g_cModel'] += ebv_newcoords * R_G_LSST
+    data_bkg['mag_r_cModel'] += ebv_newcoords * R_R_LSST
+
+
+
+    data_in_circle = {key: val[in_circle] for key, val in data_bkg.items()}
 
     return data_in_circle
